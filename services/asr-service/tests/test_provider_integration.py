@@ -13,9 +13,9 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def test_client(monkeypatch):
     """Client with test mode enabled so /validate can succeed."""
-    from app.config import settings
+    from asr_app.config import settings
     monkeypatch.setattr(settings, "test_mode", True)
-    from app.main import app
+    from asr_app.main import app
     return TestClient(app)
 
 
@@ -90,7 +90,7 @@ def test_calibrate_measures_silence():
     """Calibration on silence (all-zero PCM) returns very low noise floor."""
     import struct
     from fastapi.testclient import TestClient
-    from app.main import app
+    from asr_app.main import app
 
     # 1 second of silence at 16kHz, 16-bit mono = 32000 zero bytes
     silence = struct.pack("<16000h", *([0] * 16000))
@@ -114,7 +114,7 @@ def test_calibrate_measures_loud_signal():
     """Calibration on loud signal returns higher noise floor."""
     import struct
     from fastapi.testclient import TestClient
-    from app.main import app
+    from asr_app.main import app
 
     # Loud signal: max-amplitude 16-bit samples
     loud = struct.pack("<16000h", *([30000] * 16000))

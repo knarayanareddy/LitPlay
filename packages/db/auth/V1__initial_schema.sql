@@ -8,13 +8,14 @@ CREATE TYPE consent_status AS ENUM ('pending', 'verified', 'rejected', 'revoked'
 
 CREATE TABLE users (
     id            UUID PRIMARY KEY,
-    email         VARCHAR(255) UNIQUE NOT NULL,
+    email         VARCHAR(255) NOT NULL,
     password_hash VARCHAR(255),          -- NULL for OAuth-only users
     role          user_role NOT NULL,
     display_name  VARCHAR(100),
     date_of_birth DATE,                   -- required for students (COPPA)
     locale        VARCHAR(10) DEFAULT 'en-US',
     requires_parental_consent BOOLEAN NOT NULL DEFAULT FALSE,
+    parent_id     UUID REFERENCES users(id),
     created_at    TIMESTAMPTZ NOT NULL,
     updated_at    TIMESTAMPTZ NOT NULL,
     deleted_at    TIMESTAMPTZ
@@ -54,6 +55,15 @@ CREATE TABLE parental_consents (
     updated_at      TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE password_reset_tokens (
+    id          UUID PRIMARY KEY,
+    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash  VARCHAR(255) UNIQUE NOT NULL,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL
+);
+
 CREATE TABLE deletion_requests (
     id          UUID PRIMARY KEY,
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -68,7 +78,7 @@ CREATE TABLE deletion_requests (
 -- The updated_at trigger keeps this table from being auto-pruned.
 
 -- Indexes
-CREATE INDEX idx_users_email ON users (email) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX idx_users_email_active_unique ON users (lower(email)) WHERE deleted_at IS NULL;
 CREATE INDEX idx_users_role  ON users (role);
 CREATE INDEX idx_refresh_tokens_user ON refresh_tokens (user_id);
 CREATE INDEX idx_refresh_tokens_family ON refresh_tokens (token_family);

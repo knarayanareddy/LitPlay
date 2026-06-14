@@ -117,8 +117,11 @@ export function registerAuthRoutes(app: FastifyInstance, service: AuthService) {
     }
     try {
       const deviceId = (req.headers['x-device-id'] as string) ?? undefined;
-      const tokens = await service.refresh(body.refreshToken, deviceId);
-      reply.send({ tokens });
+      const { tokens, user } = await service.refreshSession(body.refreshToken, deviceId);
+      reply.send({
+        tokens,
+        user: { id: user.id, email: user.email, role: user.role },
+      });
     } catch (e) {
       const err = e as Error & { statusCode?: number; code?: string };
       return apiError(reply, err.statusCode ?? 500, err.code ?? 'ERROR', err.message);
@@ -244,15 +247,15 @@ export function registerAuthRoutes(app: FastifyInstance, service: AuthService) {
       if (user.role === 'student' && user.sub !== childId) {
         return apiError(reply, 403, 'FORBIDDEN', 'Cannot view another student\'s consent status');
       }
+      const consent = await service.getConsentStatus(childId);
       if (user.role === 'parent' && user.sub !== childId) {
-        // Verify parent is linked to this child
-        const consent = await service.getConsentStatus(childId);
-        if (consent?.parentId && consent.parentId !== user.sub) {
+        // Parents may only view consent for explicitly linked children. A null
+        // parentId is not proof of access; it is an unclaimed pending consent.
+        if (!consent?.parentId || consent.parentId !== user.sub) {
           return apiError(reply, 403, 'FORBIDDEN', 'Not the designated parent for this child');
         }
       }
 
-      const consent = await service.getConsentStatus(childId);
       if (!consent) {
         return reply.send({ childId, status: 'not_required' });
       }

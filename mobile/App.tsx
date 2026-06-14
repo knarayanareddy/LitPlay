@@ -5,7 +5,7 @@
  */
 
 import React, { useEffect } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet, AppState } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { initI18n } from './src/i18n';
 import { useAppStore, onAppBackground, onAppForeground } from './src/stores/app-store';
@@ -24,13 +24,11 @@ export default function App() {
 
   useEffect(() => {
     // §16.3 rule 3 — handle app backgrounding/foregrounding for token clearing
-    // In production this uses AppState from react-native
-    const mockAppStateChange = (nextState: string) => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'background') onAppBackground();
       if (nextState === 'active') onAppForeground();
-    };
-    // const subscription = AppState.addEventListener('change', mockAppStateChange);
-    // return () => subscription.remove();
+    });
+    return () => subscription.remove();
   }, []);
 
   if (!isAuthenticated) {

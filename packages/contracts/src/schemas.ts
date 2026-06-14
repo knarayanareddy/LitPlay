@@ -53,6 +53,7 @@ export const UpdateSessionSchema = z.object({
 });
 
 export const CreateGateAttemptSchema = z.object({
+  id: uuid.optional(),
   gateId: uuid,
   attemptNumber: z.number().int().min(1),
   transcript: z.string().max(5000).optional(),
@@ -104,7 +105,11 @@ export const CreateClassroomSchema = z.object({
   teacherId: uuid,
 });
 
-export const JoinClassroomSchema = z.object({
+export const UpdateClassroomSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+});
+
+export const JoinClassroomSchema = z.object({ 
   joinCode: z.string().regex(/^[A-Z0-9]{6}$/),
   studentId: uuid,
 });

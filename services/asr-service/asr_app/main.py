@@ -21,7 +21,8 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 import structlog
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from pydantic import BaseModel, Field
@@ -173,11 +174,38 @@ def _active_provider() -> str:
     return "none"
 
 
+# --- Auth dependency (§16.2) -------------------------------------------------
+
+
+def require_student_or_admin_auth(authorization: str | None = Header(default=None)) -> dict:
+    if not settings.auth_required:
+        return {"sub": "dev", "role": "admin"}
+    if not settings.jwt_access_secret:
+        raise HTTPException(status_code=503, detail="ASR auth is required but JWT secret is not configured")
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or malformed Authorization header")
+    token = authorization[7:]
+    try:
+        import jwt
+
+        payload = jwt.decode(token, settings.jwt_access_secret, algorithms=["HS256"])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Access token is invalid or expired")
+    role = payload.get("role")
+    if role not in ("student", "admin"):
+        raise HTTPException(status_code=403, detail="ASR validation is only available to students/admins")
+    return payload
+
+
 # --- POST /api/v1/asr/validate (§12) ---
 
 
 @app.post("/api/v1/asr/validate", response_model=ValidateResponse)
-async def validate(body: ValidateRequest, request: Request):
+async def validate(
+    body: ValidateRequest,
+    request: Request,
+    auth: dict = Depends(require_student_or_admin_auth),
+):
     """
     Validate a reading-aloud attempt.
 
@@ -192,11 +220,23 @@ async def validate(body: ValidateRequest, request: Request):
         request_id=request_id, gate_id=body.gateId, student_id=body.studentId
     )
 
+    if auth.get("role") == "student" and auth.get("sub") != body.studentId:
+        raise HTTPException(status_code=403, detail="Cannot validate ASR for another student")
+
     if body.audioMetadata.durationMs > MAX_AUDIO_DURATION_MS:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"Audio exceeds max duration of {MAX_AUDIO_DURATION_MS}ms",
         )
+
+    # Defense in depth: validate base64 and cap decoded request size. Duration
+    # metadata is client-provided and cannot be the only protection.
+    try:
+        decoded_audio = base64.b64decode(body.audioBase64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="audioBase64 is not valid base64")
+    if len(decoded_audio) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Audio payload exceeds 2MB limit")
 
     # --- Transcription ---
     try:
@@ -252,11 +292,44 @@ async def validate(body: ValidateRequest, request: Request):
     )
 
 
+def _compute_calibration(audio_base64: str) -> tuple[float, float]:
+    try:
+        raw = base64.b64decode(audio_base64)
+    except Exception:
+        raw = b""
+
+    pcm_start = 44 if len(raw) > 44 and raw[:4] == b"RIFF" else 0
+    pcm_data = raw[pcm_start:]
+    num_samples = len(pcm_data) // 2
+
+    if num_samples > 0:
+        try:
+            samples = struct.unpack(f"<{num_samples}h", pcm_data[: num_samples * 2])
+        except struct.error:
+            samples = []
+        if samples:
+            sum_sq = sum(sample * sample for sample in samples)
+            rms = math.sqrt(sum_sq / num_samples) if sum_sq > 0 else 1.0
+            rms_normalized = max(rms / 32767.0, 1e-10)
+            noise_floor_db = 20 * math.log10(rms_normalized)
+        else:
+            noise_floor_db = -60.0
+    else:
+        noise_floor_db = -60.0
+
+    target_dbfs = -40.0
+    gain = max(0.0, min(12.0, target_dbfs - noise_floor_db))
+    return round(noise_floor_db, 1), round(gain, 1)
+
+
 # --- POST /api/v1/asr/calibrate (§11.7) ---
 
 
 @app.post("/api/v1/asr/calibrate", response_model=CalibrateResponse)
-async def calibrate(body: CalibrateRequest):
+async def calibrate(
+    body: CalibrateRequest,
+    auth: dict = Depends(require_student_or_admin_auth),
+):
     """
     Measure ambient noise floor and recommend mic gain (§18 calibration, §11.7).
 
@@ -271,45 +344,14 @@ async def calibrate(body: CalibrateRequest):
     import uuid
     from datetime import datetime, timedelta, timezone
 
-    try:
-        raw = base64.b64decode(body.audioBase64)
-    except Exception:
-        raw = b""
+    if auth.get("role") == "student" and auth.get("sub") != body.studentId:
+        raise HTTPException(status_code=403, detail="Cannot calibrate ASR for another student")
 
-    # Parse 16-bit PCM samples (mono) to compute RMS energy
-    # If the data has a WAV header, skip it
-    pcm_start = 0
-    if len(raw) > 44 and raw[:4] == b"RIFF":
-        pcm_start = 44
-
-    pcm_data = raw[pcm_start:]
-    num_samples = len(pcm_data) // 2  # 16-bit = 2 bytes per sample
-
-    if num_samples > 0:
-        # Unpack 16-bit signed samples
-        try:
-            samples = struct.unpack(f"<{num_samples}h", pcm_data[: num_samples * 2])
-        except struct.error:
-            samples = []
-        if samples:
-            # Compute RMS (root-mean-square) energy
-            sum_sq = sum(s * s for s in samples)
-            rms = math.sqrt(sum_sq / num_samples) if sum_sq > 0 else 1.0
-            # Convert RMS to dBFS (relative to full-scale 16-bit: 32767)
-            rms_normalized = max(rms / 32767.0, 1e-10)
-            noise_floor_db = 20 * math.log10(rms_normalized)
-        else:
-            noise_floor_db = -60.0
-    else:
-        noise_floor_db = -60.0  # silence if no valid samples
-
-    # Recommend gain to bring noise floor to target of -40 dBFS
-    target_dbfs = -40.0
-    gain = max(0.0, min(12.0, target_dbfs - noise_floor_db))
+    noise_floor_db, gain = await run_in_threadpool(_compute_calibration, body.audioBase64)
 
     return CalibrateResponse(
-        noiseFloorDb=round(noise_floor_db, 1),
-        gainRecommendationDb=round(gain, 1),
+        noiseFloorDb=noise_floor_db,
+        gainRecommendationDb=gain,
         calibrationId=str(uuid.uuid4()),
         validUntil=(datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
     )

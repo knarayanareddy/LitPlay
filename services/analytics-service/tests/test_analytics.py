@@ -4,7 +4,7 @@ Tests event consumption and ClickHouse row mapping.
 """
 
 import pytest
-from app import AnalyticsService, InMemoryAnalyticsRepository, GateEventRow
+from analytics_app import AnalyticsService, InMemoryAnalyticsRepository, GateEventRow
 
 
 @pytest.fixture

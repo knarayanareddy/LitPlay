@@ -88,22 +88,23 @@ declare module 'fastify' {
  * their children, teachers see their classrooms, admins see everything.
  */
 export function canAccessStudent(
-  user: LitPlayJwtPayload,
+  user: LitPlayJwtPayload & { childIds?: string[]; studentIds?: string[] },
   studentId: string,
 ): boolean {
   if (user.role === 'admin') return true;
   if (user.role === 'student') return user.sub === studentId;
+
   if (user.role === 'parent') {
-    // parentId claim in the student's JWT would be set at login
-    // Parents are linked to children via the parentId field
-    // For now, we check if this student belongs to this parent
-    // In production, this would be validated against classroom/parent-child records
-    return user.parentId === studentId || user.sub === studentId;
+    // Parent access must be explicitly represented in the token. We do not infer
+    // parent-child links from parentId (that claim belongs on student tokens).
+    return (user.childIds ?? []).includes(studentId);
   }
-  // Teachers: allow access (classroom membership checked at the data level)
-  // A teacher can only see students in their classrooms — the classroom-service
-  // would validate membership. For data endpoints, we allow and rely on the
-  // classroom scoping in the query.
-  if (user.role === 'teacher') return true;
+
+  if (user.role === 'teacher') {
+    // Teacher access must be constrained to classroom membership by the caller
+    // or encoded into the service token as studentIds. Never allow all students.
+    return (user.studentIds ?? []).includes(studentId);
+  }
+
   return false;
 }

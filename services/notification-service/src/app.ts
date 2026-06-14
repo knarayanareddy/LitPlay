@@ -6,11 +6,12 @@
  * calls service.handleEvent() on each message.
  */
 
-import { createService, InMemoryEventBus, type EventBus } from '@litplay/server-kit';
+import { createEventBus, createService, InMemoryEventBus, type EventBus } from '@litplay/server-kit';
 import { TOPICS } from '@litplay/contracts';
 import { NotificationService } from './notification-service.js';
 import {
   InMemoryNotificationRepository,
+  PostgresNotificationRepository,
   type NotificationRepository,
 } from './notification-service.js';
 import { registerNotificationRoutes } from './routes/notification-routes.js';
@@ -21,8 +22,8 @@ export interface BuildAppOptions {
 }
 
 export function buildApp(opts: BuildAppOptions = {}) {
-  const repo = opts.repo ?? new InMemoryNotificationRepository();
-  const eventBus = opts.eventBus ?? new InMemoryEventBus();
+  const repo = opts.repo ?? (process.env.DATABASE_URL ? new PostgresNotificationRepository() : new InMemoryNotificationRepository());
+  const eventBus = opts.eventBus ?? createEventBus();
   const service = new NotificationService({ repo });
 
   // §15.3 — subscribe to all relevant topics so events are dispatched
@@ -36,7 +37,7 @@ export function buildApp(opts: BuildAppOptions = {}) {
     }
   }
 
-  const app = createService({ name: 'notification-service', port: 3005, logger: false, rateLimit: false });
+  const app = createService({ name: 'notification-service', port: 3005, logger: false, rateLimit: process.env.NODE_ENV === 'test' ? false : true });
   registerNotificationRoutes(app, service);
   return { app, service, repo, eventBus };
 }

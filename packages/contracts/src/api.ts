@@ -78,6 +78,8 @@ export interface UpdateSessionRequest {
 }
 
 export interface CreateGateAttemptRequest {
+  /** Client-generated for offline sync idempotency; server generates if absent. */
+  id?: string;
   gateId: string;
   attemptNumber: number;
   transcript?: string;
@@ -168,6 +170,10 @@ export interface CreateAssignmentRequest {
 export interface CreateClassroomRequest {
   name: string;
   teacherId: string;
+}
+
+export interface UpdateClassroomRequest {
+  name?: string;
 }
 
 export interface JoinClassroomRequest {

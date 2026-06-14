@@ -21,6 +21,8 @@ export interface LitPlayJwtPayload extends JwtPayload {
   role: 'student' | 'parent' | 'teacher' | 'admin';
   classroomIds?: string[];
   parentId?: string;
+  childIds?: string[];
+  studentIds?: string[];
 }
 
 export function signAccessToken(

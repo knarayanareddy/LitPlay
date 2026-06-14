@@ -2,7 +2,7 @@
   "name": "litplay",
   "version": "2.0.0",
   "private": true,
-  "description": "LitPlay — literacy-first educational gaming platform with ASR-powered reading gates",
+  "description": "LitPlay \u2014 literacy-first educational gaming platform with ASR-powered reading gates",
   "license": "Proprietary",
   "engines": {
     "node": ">=20.0.0"
@@ -14,11 +14,13 @@
     "services/content-service",
     "services/classroom-service",
     "services/notification-service"
-  ],  "scripts": {
-    "build": "tsc -b",
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "lint": "eslint .",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint \"{packages,services,mobile,tools}/**/*.{ts,tsx}\" --ignore-pattern \"**/dist/**\" --ignore-pattern \"**/node_modules/**\"", 
+    "typecheck": "npm run build --workspace @litplay/contracts && npm run build --workspace @litplay/server-kit && npm run typecheck --workspaces --if-present",
+    "migrate": "tsx tools/migrate.ts",
     "dev:auth": "npm run dev --workspace services/auth-service",
     "dev:progress": "npm run dev --workspace services/progress-service",
     "dev:content": "npm run dev --workspace services/content-service",
@@ -32,6 +34,9 @@
     "resolve.exports": "^2.0.3",
     "ts-jest": "^29.1.5",
     "tsx": "^4.15.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "eslint": "^8.57.1",
+    "@typescript-eslint/parser": "^7.18.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0"
   }
 }

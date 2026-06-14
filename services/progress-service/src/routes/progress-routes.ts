@@ -11,8 +11,13 @@ import {
   CreateSessionSchema,
   UpdateSessionSchema,
 } from '@litplay/contracts';
-import { apiError, paginate, requireAuth, requireStudentAccess } from '@litplay/server-kit';
+import { z } from 'zod';
+import { apiError, canAccessStudent, paginate, requireAuth, requireStudentAccess } from '@litplay/server-kit';
 import type { ProgressService } from '../progress-service.js';
+
+const BatchFluencySchema = z.object({
+  studentIds: z.array(z.string().uuid()).max(100),
+});
 
 export function registerProgressRoutes(app: FastifyInstance, service: ProgressService) {
   const BASE = '/api/v1/progress';
@@ -22,10 +27,9 @@ export function registerProgressRoutes(app: FastifyInstance, service: ProgressSe
     const parsed = CreateSessionSchema.safeParse(req.body);
     if (!parsed.success) return apiError(reply, 400, 'VALIDATION_ERROR', parsed.error.message);
 
-    // §16.2 — only the student themselves, their parent, or admin can create sessions
+    // §16.2 — only callers explicitly scoped to this student may create sessions
     const user = req.user!;
-    if (parsed.data.studentId !== user.sub && user.role !== 'admin' &&
-        !(user.role === 'parent' && user.parentId === parsed.data.studentId)) {
+    if (!canAccessStudent(user, parsed.data.studentId)) {
       return apiError(reply, 403, 'FORBIDDEN', 'Cannot create sessions for another student');
     }
 
@@ -39,6 +43,10 @@ export function registerProgressRoutes(app: FastifyInstance, service: ProgressSe
     const parsed = UpdateSessionSchema.safeParse(req.body);
     if (!parsed.success) return apiError(reply, 400, 'VALIDATION_ERROR', parsed.error.message);
     try {
+      const existing = await service.getSession(sessionId);
+      if (!canAccessStudent(req.user!, existing.studentId)) {
+        return apiError(reply, 403, 'FORBIDDEN', 'Cannot update another student\'s session');
+      }
       const session = await service.updateSession(sessionId, parsed.data);
       reply.send(session);
     } catch (e) {
@@ -53,7 +61,7 @@ export function registerProgressRoutes(app: FastifyInstance, service: ProgressSe
     try {
       const session = await service.getSession(sessionId);
       // §16.2 — verify the caller has access to this session's student
-      if (req.user!.role === 'student' && session.studentId !== req.user!.sub) {
+      if (!canAccessStudent(req.user!, session.studentId)) {
         return apiError(reply, 403, 'FORBIDDEN', 'Cannot access another student\'s session');
       }
       reply.send(session);
@@ -82,12 +90,30 @@ export function registerProgressRoutes(app: FastifyInstance, service: ProgressSe
     const parsed = CreateGateAttemptSchema.safeParse(req.body);
     if (!parsed.success) return apiError(reply, 400, 'VALIDATION_ERROR', parsed.error.message);
     try {
+      const session = await service.getSession(sessionId);
+      if (!canAccessStudent(req.user!, session.studentId)) {
+        return apiError(reply, 403, 'FORBIDDEN', 'Cannot write attempts for another student\'s session');
+      }
       const attempt = await service.recordGateAttempt(sessionId, parsed.data);
       reply.status(201).send(attempt);
     } catch (e) {
       const err = e as Error & { statusCode?: number; code?: string };
       return apiError(reply, err.statusCode ?? 500, err.code ?? 'ERROR', err.message);
     }
+  });
+
+  // POST /progress/students/fluency/batch — classroom dashboard batch lookup
+  app.post(`${BASE}/students/fluency/batch`, { preHandler: requireAuth }, async (req, reply) => {
+    const parsed = BatchFluencySchema.safeParse(req.body);
+    if (!parsed.success) return apiError(reply, 400, 'VALIDATION_ERROR', parsed.error.message);
+    const result: Record<string, unknown> = {};
+    for (const studentId of parsed.data.studentIds) {
+      if (!canAccessStudent(req.user!, studentId)) {
+        return apiError(reply, 403, 'FORBIDDEN', 'Batch contains an unauthorized student');
+      }
+      result[studentId] = await service.getFluency(studentId);
+    }
+    reply.send(result);
   });
 
   // GET /progress/students/:studentId/fluency — RBAC scoped (§16.2)
@@ -116,6 +142,11 @@ export function registerProgressRoutes(app: FastifyInstance, service: ProgressSe
   app.post(`${BASE}/sessions/batch-sync`, { preHandler: requireAuth }, async (req, reply) => {
     const parsed = BatchSyncSchema.safeParse(req.body);
     if (!parsed.success) return apiError(reply, 400, 'VALIDATION_ERROR', parsed.error.message);
+    for (const session of parsed.data.sessions) {
+      if (!canAccessStudent(req.user!, session.studentId)) {
+        return apiError(reply, 403, 'FORBIDDEN', 'Batch contains a session for an unauthorized student');
+      }
+    }
     const result = await service.batchSync(parsed.data);
     reply.send(result);
   });

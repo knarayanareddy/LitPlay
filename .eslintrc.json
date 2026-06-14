@@ -1,14 +1,23 @@
 {
   "root": true,
   "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint"],
   "parserOptions": { "ecmaVersion": 2022, "sourceType": "module" },
-  "extends": [
-    "eslint:recommended"
-  ],
+  "env": {
+    "es2022": true,
+    "node": true,
+    "jest": true,
+    "browser": true
+  },
+  "extends": ["eslint:recommended"],
+  "globals": {
+    "__DEV__": "readonly"
+  },
   "rules": {
+    "no-undef": "off",
     "no-unused-vars": "off",
     "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
-    "no-console": ["warn", { "allow": ["warn", "error"] }]
+    "no-console": ["warn", { "allow": ["warn", "error", "log"] }]
   },
-  "ignorePatterns": ["dist/", "node_modules/", "*.js", "*.cjs"]
+  "ignorePatterns": ["dist/", "node_modules/", "*.js", "*.cjs", "coverage/", "*.egg-info/"]
 }

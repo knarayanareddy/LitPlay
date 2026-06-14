@@ -2,7 +2,8 @@
  * Rate limiting middleware (§27.3 rule 1).
  *
  * 100 req/min unauthenticated (by IP), 1000 req/min authenticated (by user).
- * Uses a sliding-window counter in memory. In production this would be Redis.
+ * Uses Redis when REDIS_URL is configured; otherwise in-memory fallback for
+ * local/dev. Redis makes limits shared across ECS tasks.
  */
 
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -13,16 +14,18 @@ interface RateBucket {
   windowStart: number;
 }
 
-const WINDOW_MS = 60_000; // 1 minute
+const WINDOW_MS = 60_000;
 const UNAUTH_LIMIT = 100;
 const AUTH_LIMIT = 1000;
 
 const unauthBuckets = new Map<string, RateBucket>();
 const authBuckets = new Map<string, RateBucket>();
 
+let redisClientPromise: Promise<import('redis').RedisClientType> | null = null;
+let redisUnavailable = false;
+
 function getKey(req: FastifyRequest, authenticated: boolean): string {
   if (authenticated && req.user) return `user:${req.user.sub}`;
-  // Fall back to IP address
   const forwarded = req.headers['x-forwarded-for'];
   const ip =
     (Array.isArray(forwarded) ? forwarded[0] : forwarded) ??
@@ -31,7 +34,7 @@ function getKey(req: FastifyRequest, authenticated: boolean): string {
   return `ip:${ip}`;
 }
 
-function checkBucket(
+function checkMemoryBucket(
   buckets: Map<string, RateBucket>,
   key: string,
   limit: number,
@@ -46,41 +49,60 @@ function checkBucket(
   return bucket.count <= limit;
 }
 
-/**
- * Rate limit preHandler. Must run AFTER requireAuth so it can distinguish
- * authenticated vs unauthenticated traffic.
- *
- * Usage:
- *   app.register(rateLimitHook)  — registers as a global preHandler
- * Or per-route:
- *   { preHandler: [requireAuth, rateLimit] }
- */
+async function getRedisClient(): Promise<import('redis').RedisClientType | null> {
+  if (!process.env.REDIS_URL || redisUnavailable) return null;
+  if (!redisClientPromise) {
+    redisClientPromise = (async () => {
+      const { createClient } = await import('redis');
+      const client = createClient({ url: process.env.REDIS_URL });
+      client.on('error', () => {
+        redisUnavailable = true;
+      });
+      await client.connect();
+      return client as import('redis').RedisClientType;
+    })();
+  }
+  try {
+    return await redisClientPromise;
+  } catch {
+    redisUnavailable = true;
+    return null;
+  }
+}
+
+async function checkRedisBucket(key: string, limit: number): Promise<boolean | null> {
+  const client = await getRedisClient();
+  if (!client) return null;
+  const redisKey = `rl:${key}:${Math.floor(Date.now() / WINDOW_MS)}`;
+  const count = await client.incr(redisKey);
+  if (count === 1) await client.pExpire(redisKey, WINDOW_MS + 1000);
+  return count <= limit;
+}
+
+async function checkRateLimit(
+  req: FastifyRequest,
+  authenticated: boolean,
+): Promise<boolean> {
+  const key = getKey(req, authenticated);
+  const limit = authenticated ? AUTH_LIMIT : UNAUTH_LIMIT;
+  const redisResult = await checkRedisBucket(key, limit);
+  if (redisResult !== null) return redisResult;
+  return checkMemoryBucket(authenticated ? authBuckets : unauthBuckets, key, limit);
+}
+
 export async function rateLimit(
   req: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
-  const authenticated = !!req.user;
-  const key = getKey(req, authenticated);
-  const buckets = authenticated ? authBuckets : unauthBuckets;
-  const limit = authenticated ? AUTH_LIMIT : UNAUTH_LIMIT;
-
-  if (!checkBucket(buckets, key, limit)) {
+  if (!(await checkRateLimit(req, !!req.user))) {
     reply.header('Retry-After', '60');
     apiError(reply, 429, 'RATE_LIMITED', 'Too many requests. Please try again later.');
   }
 }
 
-/**
- * Register rate limiting as a global onRequest hook on a Fastify instance.
- * This runs BEFORE route handlers and preHandlers, so it checks the raw request.
- * Authenticated users get the higher limit — but since we don't have the user
- * yet at onRequest time, we check by IP and then re-check with the user in the
- * preHandler if needed.
- */
 export function registerRateLimit(app: import('fastify').FastifyInstance): void {
   app.addHook('onRequest', async (req, reply) => {
-    const key = getKey(req, false); // can't know auth status yet
-    if (!checkBucket(unauthBuckets, key, UNAUTH_LIMIT)) {
+    if (!(await checkRateLimit(req, false))) {
       reply.header('Retry-After', '60');
       apiError(reply, 429, 'RATE_LIMITED', 'Too many requests. Please try again later.');
     }

@@ -7,7 +7,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   CreateAssignmentSchema,
 } from '@litplay/contracts';
-import { apiError, paginate, requireAuth, requireRole } from '@litplay/server-kit';
+import { apiError, canAccessStudent, paginate, requireAuth, requireRole } from '@litplay/server-kit';
 import type { ContentService } from '../content-service.js';
 
 /** Map domain errors to HTTP error responses. */
@@ -86,11 +86,8 @@ export function registerContentRoutes(app: FastifyInstance, service: ContentServ
     const { studentId } = req.params as { studentId: string };
     const user = req.user!;
 
-    // §16.2 — students see only their own assignments, parents see children's
-    if (user.role === 'student' && user.sub !== studentId) {
-      return apiError(reply, 403, 'FORBIDDEN', 'Cannot view another student\'s assignments');
-    }
-    if (user.role === 'parent' && user.sub !== studentId && user.parentId !== studentId) {
+    // §16.2 — student assignment reads are explicitly scoped.
+    if (!canAccessStudent(user, studentId)) {
       return apiError(reply, 403, 'FORBIDDEN', 'Cannot view assignments for this student');
     }
 

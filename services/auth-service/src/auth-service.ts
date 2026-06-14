@@ -177,11 +177,11 @@ export class AuthService {
    * Creates a new user if the email doesn't exist, or links to existing.
    */
   async googleOAuth(idToken: string, deviceId?: string): Promise<{ tokens: AuthTokens; user: UserRecord }> {
-    // Production: verify with https://oauth2.googleapis.com/tokeninfo?id_token=...
-    // For now, decode the JWT payload to extract email
-    const payload = this.decodeJwtPayload(idToken);
+    const payload = await this.verifyGoogleIdToken(idToken);
     const email = payload.email as string;
-    if (!email) throw new InvalidTokenError('Google ID token missing email');
+    if (!email || payload.email_verified === false) {
+      throw new InvalidTokenError('Google ID token missing a verified email');
+    }
 
     // Check if user exists
     let user = await this.deps.repo.findUserByEmail(email);
@@ -225,6 +225,33 @@ export class AuthService {
 
     const tokens = await this.issueTokens(user, deviceId);
     return { tokens, user };
+  }
+
+  private async verifyGoogleIdToken(idToken: string): Promise<Record<string, unknown>> {
+    // Unit tests use unsigned fixture JWTs. Production and non-test environments
+    // must delegate verification to Google and validate the OAuth client audience.
+    if (process.env.NODE_ENV === 'test' || process.env.AUTH_ALLOW_UNVERIFIED_OAUTH_FOR_TESTS === 'true') {
+      return this.decodeJwtPayload(idToken);
+    }
+
+    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+    if (!clientId) {
+      throw new InvalidTokenError('GOOGLE_OAUTH_CLIENT_ID is required for Google OAuth');
+    }
+
+    const response = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`,
+    );
+    if (!response.ok) throw new InvalidTokenError('Google ID token verification failed');
+    const payload = await response.json() as Record<string, unknown>;
+
+    if (payload.aud !== clientId) throw new InvalidTokenError('Google ID token audience mismatch');
+    if (payload.iss !== 'accounts.google.com' && payload.iss !== 'https://accounts.google.com') {
+      throw new InvalidTokenError('Google ID token issuer mismatch');
+    }
+    const exp = Number(payload.exp ?? 0);
+    if (!exp || exp * 1000 <= Date.now()) throw new InvalidTokenError('Google ID token expired');
+    return payload;
   }
 
   private decodeJwtPayload(jwt: string): Record<string, unknown> {
@@ -274,6 +301,13 @@ export class AuthService {
   // --- Refresh rotation (§16.3 rules 4–5: single-use + reuse detection) ---
 
   async refresh(refreshToken: string, deviceId?: string): Promise<AuthTokens> {
+    return (await this.refreshSession(refreshToken, deviceId)).tokens;
+  }
+
+  async refreshSession(
+    refreshToken: string,
+    deviceId?: string,
+  ): Promise<{ tokens: AuthTokens; user: UserRecord }> {
     let payload: { sub: string; family: string };
     try {
       payload = verifyToken(refreshToken, JWT_REFRESH_SECRET());
@@ -306,7 +340,8 @@ export class AuthService {
     const user = await this.deps.repo.findUserById(payload.sub);
     if (!user || user.deletedAt) throw new InvalidRefreshTokenError('User not found');
 
-    return this.issueTokens(user, deviceId, payload.family);
+    const tokens = await this.issueTokens(user, deviceId, payload.family);
+    return { tokens, user };
   }
 
   // --- Logout (FR) ---
@@ -391,6 +426,7 @@ export class AuthService {
   // --- Account deletion (FR-053, §17.3) ---
 
   async deleteAccount(userId: string): Promise<void> {
+    await this.deps.repo.revokeAllUserTokens(userId);
     await this.deps.repo.softDeleteUser(userId);
     // §17.3 — publish deletion event; all services purge within 72h
     await this.deps.eventBus.publish(
@@ -410,11 +446,19 @@ export class AuthService {
     deviceId: string | undefined,
     existingFamily?: string,
   ): Promise<AuthTokens> {
+    const childIds = user.role === 'parent'
+      ? (await this.deps.repo.listChildrenForParent(user.id)).map((child) => child.id)
+      : undefined;
+
     const jwtPayload: Omit<LitPlayJwtPayload, 'iat' | 'exp'> = {
       sub: user.id,
       email: user.email,
       role: user.role,
       parentId: user.parentId ?? undefined,
+      childIds,
+      // Teacher student scoping is supplied by classroom-aware service tokens or
+      // checked in classroom-service routes. Do not grant broad access here.
+      studentIds: user.role === 'teacher' ? [] : undefined,
     };
 
     const accessToken = signAccessToken(jwtPayload, JWT_SECRET());

@@ -37,23 +37,39 @@ class WhisperGpuProvider:
     """Whisper large-v3 on NVIDIA T4 (§12.1 path 7a–9a)."""
 
     name = "whisper_gpu"
+    _model = None
 
     def is_available(self) -> bool:
         return settings.whisper_gpu_enabled
 
-    def transcribe(self, audio_base64: str) -> TranscriptionResult:
-        start = time.monotonic()
-        # Production: decode base64 → numpy → faster_whisper.decode_model()
-        # The real model import is deferred so the service boots without torch.
-        try:
+    def _get_model(self):
+        if WhisperGpuProvider._model is None:
             from faster_whisper import WhisperModel  # type: ignore
 
-            model = WhisperModel("large-v3", device="cuda", compute_type="float16")
-            segments, _info = model.transcribe(_decode_to_path(audio_base64))
+            WhisperGpuProvider._model = WhisperModel(
+                "large-v3", device="cuda", compute_type="float16"
+            )
+        return WhisperGpuProvider._model
+
+    def transcribe(self, audio_base64: str) -> TranscriptionResult:
+        import os
+
+        start = time.monotonic()
+        path = ""
+        try:
+            path = _decode_to_path(audio_base64)
+            model = self._get_model()
+            segments, _info = model.transcribe(path)
             transcript = " ".join(s.text for s in segments).strip()
         except Exception:
             # In environments without GPU/torch, surface as unavailable.
             raise ProviderUnavailableError(self.name)
+        finally:
+            if path:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
 
         latency = int((time.monotonic() - start) * 1000)
         return TranscriptionResult(
@@ -70,9 +86,40 @@ class AzureProvider:
         return bool(settings.azure_speech_key and settings.azure_speech_region)
 
     def transcribe(self, audio_base64: str) -> TranscriptionResult:
+        import base64
+        import json
+        import urllib.error
+        import urllib.request
+
         start = time.monotonic()
-        # Production: azure.cognitiveservices.speech.SpeechRecognizer
-        raise ProviderUnavailableError(self.name)
+        if not self.is_available():
+            raise ProviderUnavailableError(self.name)
+
+        audio = base64.b64decode(audio_base64)
+        language = getattr(settings, "azure_speech_language", "en-US")
+        url = (
+            f"https://{settings.azure_speech_region}.stt.speech.microsoft.com/"
+            f"speech/recognition/conversation/cognitiveservices/v1?language={language}"
+        )
+        req = urllib.request.Request(
+            url,
+            data=audio,
+            headers={
+                "Ocp-Apim-Subscription-Key": settings.azure_speech_key or "",
+                "Content-Type": "audio/wav; codecs=audio/pcm; samplerate=16000",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            raise ProviderUnavailableError(self.name)
+
+        transcript = payload.get("DisplayText") or payload.get("Text") or ""
+        latency = int((time.monotonic() - start) * 1000)
+        return TranscriptionResult(transcript=transcript, latency_ms=latency, provider=self.name)
 
 
 class WhisperCppProvider:

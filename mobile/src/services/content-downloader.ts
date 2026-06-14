@@ -22,7 +22,7 @@ export interface DownloadResult {
  */
 export async function downloadContentBundle(
   worldId: string,
-  signedUrl: string,
+  _signedUrl: string,
   expectedChecksum: string | null,
 ): Promise<DownloadResult> {
   // Check WiFi connectivity (FR-033 — only on WiFi)
@@ -67,8 +67,8 @@ async function isOnWifi(): Promise<boolean> {
  * §18.2 rule 6 — Check if a bundle is already downloaded and up-to-date.
  */
 export function isBundleDownloaded(
-  worldId: string,
-  manifestVersion: string,
+  _worldId: string,
+  _manifestVersion: string,
 ): boolean {
   // Production:
   // const path = `${RNFS.DocumentDirectoryPath}/content/${worldId}/bundle.zip`;

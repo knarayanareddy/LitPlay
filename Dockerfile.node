@@ -42,6 +42,12 @@ RUN npm ci --omit=dev --workspaces --include-workspace-root 2>/dev/null || npm i
 
 ARG SERVICE_NAME
 ENV SERVICE_NAME=${SERVICE_NAME}
+
+# Copy compiled shared workspace packages. The source tree is copied above, but
+# .dockerignore excludes dist/, and service builds import the package exports
+# (packages/*/dist). Without these copies production containers fail at runtime.
+COPY --from=builder /app/packages/contracts/dist ./packages/contracts/dist
+COPY --from=builder /app/packages/server-kit/dist ./packages/server-kit/dist
 COPY --from=builder /app/services/${SERVICE_NAME}/dist ./services/${SERVICE_NAME}/dist
 
 USER litplay

@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from asr_app.main import app
 
 
 @pytest.fixture
@@ -94,3 +94,41 @@ def test_calibrate_returns_valid_profile(client):
     assert "gainRecommendationDb" in data
     assert "calibrationId" in data
     assert "validUntil" in data
+
+
+def test_validate_requires_auth_when_configured(monkeypatch):
+    from asr_app.config import settings
+    monkeypatch.setattr(settings, "auth_required", True)
+    monkeypatch.setattr(settings, "jwt_access_secret", "test-secret-with-at-least-32-bytes")
+    client = TestClient(app)
+    body = {
+        "gateId": "00000000-0000-0000-0000-000000000001",
+        "studentId": "00000000-0000-0000-0000-000000000002",
+        "passageText": "the cat sat",
+        "difficulty": "Easy",
+        "audioBase64": "AAAA",
+        "audioMetadata": {"durationMs": 2000, "noiseFloorDb": -40.0, "vadResult": True},
+        "attemptNumber": 1,
+    }
+    r = client.post("/api/v1/asr/validate", json=body)
+    assert r.status_code == 401
+
+
+def test_validate_rejects_student_for_other_student_when_auth_configured(monkeypatch):
+    import jwt
+    from asr_app.config import settings
+    monkeypatch.setattr(settings, "auth_required", True)
+    monkeypatch.setattr(settings, "jwt_access_secret", "test-secret-with-at-least-32-bytes")
+    token = jwt.encode({"sub": "other-student", "role": "student"}, "test-secret-with-at-least-32-bytes", algorithm="HS256")
+    client = TestClient(app)
+    body = {
+        "gateId": "00000000-0000-0000-0000-000000000001",
+        "studentId": "00000000-0000-0000-0000-000000000002",
+        "passageText": "the cat sat",
+        "difficulty": "Easy",
+        "audioBase64": "AAAA",
+        "audioMetadata": {"durationMs": 2000, "noiseFloorDb": -40.0, "vadResult": True},
+        "attemptNumber": 1,
+    }
+    r = client.post("/api/v1/asr/validate", json=body, headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 403

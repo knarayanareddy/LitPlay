@@ -120,7 +120,13 @@ namespace LitPlay
 
         private void SendAck(string requestId)
         {
-            var ack = BridgeMessage.Create(BRIDGE_ACK);
+            // Put the correlation id in both the message header and payload.
+            // RN primarily reads msg.requestId; payload support keeps the bridge
+            // compatible with older clients.
+            var ack = BridgeMessage.Create(
+                BRIDGE_ACK,
+                JsonUtility.ToJson(new BridgeAckPayload { requestId = requestId })
+            );
             ack.requestId = requestId;
             LitPlayBridge.SendToRN(ack);
         }

@@ -42,9 +42,14 @@ class Settings:
     # In production these come from AWS Secrets Manager.
     azure_speech_key: str | None = os.getenv("AZURE_SPEECH_KEY")
     azure_speech_region: str | None = os.getenv("AZURE_SPEECH_REGION", "eastus")
+    azure_speech_language: str = os.getenv("AZURE_SPEECH_LANGUAGE", "en-US")
 
     # Whether the local GPU/Whisper path is available. In CI we stub it.
     whisper_gpu_enabled: bool = os.getenv("WHISPER_GPU_ENABLED", "false").lower() == "true"
+
+    # Auth: enabled whenever JWT_ACCESS_SECRET is present or explicitly forced.
+    jwt_access_secret: str | None = os.getenv("JWT_ACCESS_SECRET")
+    auth_required: bool = os.getenv("ASR_AUTH_REQUIRED", "auto").lower() == "true" or bool(jwt_access_secret)
 
     # Test mode — never enable in production. Lets /validate succeed without
     # a GPU by echoing the base64-decoded audio as the transcript.

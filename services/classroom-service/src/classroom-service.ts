@@ -8,6 +8,7 @@ import {
   type CreateClassroomRequest,
   type JoinClassroomRequest,
   type SetGoalRequest,
+  type UpdateClassroomRequest,
 } from '@litplay/contracts';
 import type { EventBus, InterServiceClient } from '@litplay/server-kit';
 import { generateJoinCode } from '@litplay/server-kit';
@@ -75,6 +76,13 @@ export class ClassroomService {
     return c;
   }
 
+  async updateClassroom(id: string, req: UpdateClassroomRequest): Promise<ClassroomRecord> {
+    await this.getClassroom(id);
+    const patch: Partial<ClassroomRecord> = {};
+    if (req.name !== undefined) patch.name = req.name;
+    return this.deps.repo.updateClassroom(id, patch);
+  }
+
   async deleteClassroom(id: string): Promise<void> {
     await this.getClassroom(id);
     await this.deps.repo.deleteClassroom(id);
@@ -94,6 +102,11 @@ export class ClassroomService {
     };
     await this.deps.repo.setJoinCode(code);
     return code;
+  }
+
+  async getJoinCodeByClassroom(classroomId: string): Promise<JoinCodeRecord | null> {
+    await this.getClassroom(classroomId);
+    return this.deps.repo.getJoinCodeByClassroom(classroomId);
   }
 
   async joinClassroom(req: JoinClassroomRequest): Promise<ClassroomMemberRecord> {
@@ -180,18 +193,18 @@ export class ClassroomService {
     const members = await this.deps.repo.listMembers(classroomId);
     const students = members.filter((m) => m.role === 'student');
 
-    // If inter-service client is available, fetch fluency for each student
+    // If inter-service client is available, fetch fluency in one batch to avoid
+    // an N+1 dashboard request pattern for large classrooms.
     if (this.deps.interService) {
-      const results = await Promise.all(
-        students.map(async (s) => ({
-          studentId: s.userId,
-          role: s.role,
-          fluency: await this.deps.interService!
-            .getStudentFluency(s.userId)
-            .catch(() => null),
-        })),
-      );
-      return results;
+      const studentIds = students.map((s) => s.userId);
+      const fluencyByStudent = await this.deps.interService
+        .getStudentsFluency(studentIds)
+        .catch(() => ({} as Record<string, unknown>));
+      return students.map((s) => ({
+        studentId: s.userId,
+        role: s.role,
+        fluency: fluencyByStudent[s.userId] ?? null,
+      }));
     }
 
     // Without inter-service client, return member list only

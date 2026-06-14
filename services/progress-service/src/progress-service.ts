@@ -120,9 +120,14 @@ export class ProgressService {
     sessionId: string,
     req: CreateGateAttemptRequest,
   ): Promise<GateAttemptRecord> {
+    if (req.id) {
+      const existing = await this.deps.repo.getGateAttempt(req.id);
+      if (existing) return existing;
+    }
+
     const now = new Date().toISOString();
     const attempt: GateAttemptRecord = {
-      id: crypto.randomUUID(),
+      id: req.id ?? crypto.randomUUID(),
       sessionId,
       gateId: req.gateId,
       attemptNumber: req.attemptNumber,

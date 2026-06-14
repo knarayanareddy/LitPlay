@@ -1,0 +1,21 @@
+environment = "staging"
+aws_region  = "us-east-1"
+app_name    = "litplay"
+domain_name = "litplay.app"
+
+# Optional: provide ACM certificate for HTTPS ALB listener.
+acm_certificate_arn = ""
+
+# Required for CloudFront signed URLs in staging/prod.
+cloudfront_public_key_pem = ""
+
+container_images = {
+  auth-service         = "<account>.dkr.ecr.us-east-1.amazonaws.com/litplay/auth-service:<sha>"
+  progress-service     = "<account>.dkr.ecr.us-east-1.amazonaws.com/litplay/progress-service:<sha>"
+  content-service      = "<account>.dkr.ecr.us-east-1.amazonaws.com/litplay/content-service:<sha>"
+  classroom-service    = "<account>.dkr.ecr.us-east-1.amazonaws.com/litplay/classroom-service:<sha>"
+  notification-service = "<account>.dkr.ecr.us-east-1.amazonaws.com/litplay/notification-service:<sha>"
+  asr-service          = "<account>.dkr.ecr.us-east-1.amazonaws.com/litplay/asr-service:<sha>"
+  analytics-service    = "<account>.dkr.ecr.us-east-1.amazonaws.com/litplay/analytics-service:<sha>"
+  clickhouse           = "clickhouse/clickhouse-server:24.3-alpine"
+}

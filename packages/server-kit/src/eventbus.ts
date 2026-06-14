@@ -36,20 +36,36 @@ export class InMemoryEventBus implements EventBus {
  * so services that don't publish events (or the test suite) never need a broker.
  */
 export class KafkaEventBus implements EventBus {
+  private producerPromise: Promise<import('kafkajs').Producer> | null = null;
+
   constructor(private brokers: string[] = []) {}
 
+  private async getProducer(): Promise<import('kafkajs').Producer> {
+    if (!this.producerPromise) {
+      this.producerPromise = (async () => {
+        const { Kafka } = await import('kafkajs');
+        const kafka = new Kafka({ brokers: this.brokers, clientId: 'litplay' });
+        const producer = kafka.producer();
+        await producer.connect();
+        return producer;
+      })();
+    }
+    return this.producerPromise;
+  }
+
   async publish(envelope: EventEnvelope<unknown>): Promise<void> {
-    const { Kafka } = await import('kafkajs');
-    const kafka = new Kafka({ brokers: this.brokers, clientId: 'litplay' });
-    const producer = kafka.producer();
-    await producer.connect();
-    try {
-      await producer.send({
-        topic: envelope.topic,
-        messages: [{ key: envelope.eventId, value: JSON.stringify(envelope) }],
-      });
-    } finally {
+    const producer = await this.getProducer();
+    await producer.send({
+      topic: envelope.topic,
+      messages: [{ key: envelope.eventId, value: JSON.stringify(envelope) }],
+    });
+  }
+
+  async disconnect(): Promise<void> {
+    if (this.producerPromise) {
+      const producer = await this.producerPromise;
       await producer.disconnect();
+      this.producerPromise = null;
     }
   }
 }

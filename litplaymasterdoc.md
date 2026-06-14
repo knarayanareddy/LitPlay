@@ -1,8 +1,3 @@
-Let me fetch both documents in full before writing anything.The web search couldn't directly index the raw GitHub markdown files. However, based on my **deep analysis of both documents from the previous turn** (where I thoroughly read both files directly via the URLs you provided), I have all the content needed to produce this consolidated SSOT. Here is the complete, unified design document:
-
----
-
-```markdown
 # LitPlay — Master System Design Document (SSOT v2.0)
 
 **Document ID:** LITPLAY-DESIGN-SSOT-V2  
@@ -740,21 +735,22 @@ ASR Service (/api/v1/asr/validate)
 
 | Storage Layer | Library | What it stores |
 |---------------|---------|---------------|
-| **MMKV** (key-value, encrypted) | react-native-mmkv | Auth tokens, calibration profiles, feature flags, sync queue metadata, small UI state, last-sync timestamps |
-| **SQLite** (relational, queryable) | op-sqlite | Session records, gate attempt records, content manifests, assignment cache — anything that needs query/filter/sort |
+| **MMKV** (key-value, encrypted) | react-native-mmkv | Auth tokens, calibration profiles, feature flags, small UI state, last-sync timestamps |
+| **SQLite** (relational, queryable) | op-sqlite | Sync queue rows, session records, gate attempt records, content manifests, assignment cache — anything that needs query/filter/sort or can grow offline |
 
 **Rule:** If you need to query it (filter by date, sort, count) → SQLite. If it's a single value you look up by key → MMKV.
 
 ### 13.2 Sync Queue
 
 ```typescript
-// MMKV key: "syncQueue:pending"
-// Value: JSON array of SyncQueueItem
+// SQLite table: sync_queue
+// Columns: id, type, payload_json, status, created_at, retry_count, last_attempt_at
 
 interface SyncQueueItem {
   id: string;           // local UUID
   type: 'SESSION' | 'GATE_ATTEMPT';
   payload: object;      // full session/attempt object
+  status: 'pending' | 'dead';
   createdAt: string;    // ISO8601
   retryCount: number;
   lastAttemptAt?: string;
@@ -762,12 +758,13 @@ interface SyncQueueItem {
 ```
 
 **Sync rules:**
-1. On reconnect, sync service reads `syncQueue:pending` from MMKV.
+1. On reconnect, sync service reads pending rows from SQLite table `sync_queue`.
 2. Items are sent to `POST /progress/sessions/batch-sync` in batches of 20.
-3. On 2xx response, items are removed from MMKV queue.
-4. On 4xx (bad request), item is moved to `syncQueue:dead` (manual review).
-5. On 5xx or network error, item stays in queue; retry with exponential backoff (base 5s, max 5m).
-6. Max queue age: 30 days. Items older than 30 days are purged with a local warning log.
+3. On 2xx response, successfully synced rows are deleted from SQLite.
+4. Per-item failures returned by the backend are marked `dead` for manual review.
+5. On 4xx (bad request), affected rows are moved to `dead`.
+6. On 5xx or network error, rows stay `pending`; retry count and `last_attempt_at` are updated with exponential backoff (base 5s, max 5m).
+7. Max queue age: 30 days. Items older than 30 days are purged with a local warning log.
 
 ### 13.3 Conflict Resolution
 
@@ -1597,35 +1594,3 @@ Any change to this SSOT requires the following:
 
 *End of LitPlay Master System Design Document — v2.0*  
 *To propose a change, file an RFC per §32.*
-```
-
----
-
-## What this new SSOT fixes vs. the two prior docs
-
-Here is a precise accounting of every change made:
-
-### 🔧 Inconsistencies Fixed
-| # | Issue | Resolution |
-|---|-------|-----------|
-| 1 | **Storage layer conflict** — new doc said both SQLite and MMKV with no clear split | §13.1 defines an explicit responsibility split: MMKV for key-value/tokens/queue metadata, op-sqlite for queryable session/gate/content records |
-| 2 | **Expo ambiguity** — new doc implied bare RN but never said it; v1 said Expo managed | §7.1 explicitly says "bare workflow, use Expo modules à la carte only" with a clear rule and rationale |
-| 3 | **Conflicting API styles** — v1 had REST+GraphQL; new doc had REST only | §11 locks REST-only as the contract; GraphQL is explicitly deferred |
-| 4 | **Game-engine-service conflict** — v1 had server-side session orchestration; new doc had client-side Unity | §8–9 fully specifies the Unity-native + RN bridge model; no server-side game engine |
-| 5 | **Speech calibration dropped** — new doc removed calibration endpoints from v1 | §11.7 + §12 fully restore the calibration endpoint AND specify that profiles are stored client-side only in MMKV |
-| 6 | **Kafka vs Redis/BullMQ** — v1 used Redis Pub/Sub + BullMQ; new doc used Kafka | §15 standardizes on Kafka (MSK) definitively, removes all Redis queue references |
-| 7 | **React Navigation vs Expo Router** — implicit conflict between docs | §7.1 explicitly specifies React Navigation v7 |
-
-### ✅ Additions (things missing from both docs)
-| # | Addition |
-|---|---------|
-| 1 | **Complete RBAC table** (§16.2) — neither doc had a consolidated role-permission matrix |
-| 2 | **Token security rules** (§16.3) — access token memory-only policy made explicit with MMKV vs memory split |
-| 3 | **Kafka message envelope schema** (§15.4) — both docs named topics but neither defined the message wrapper format |
-| 4 | **Bridge error handling + timeout protocol** (§9.3) — neither doc specified what happens on bridge timeout |
-| 5 | **Content bundle integrity verification** (§18.2) — SHA-256 checksum rule was missing |
-| 6 | **Test coverage thresholds per layer** (§29.2) — neither doc specified minimum % by layer |
-| 7 | **Performance budgets for mobile** (§28.1) — memory, battery, and frame rate budgets were absent |
-| 8 | **Data retention policy table** (§17.2) — compliance data minimization rules were implicit only |
-| 9 | **Inviolable rules** (§32) — three rules that can never be changed without unanimous vote |
-| 10 | **Full glossary** (§33) — neither doc had a complete glossary |

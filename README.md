@@ -3,11 +3,11 @@
 > **Mission:** Make K-8 oral reading practice intrinsically motivating. Children read aloud to progress through Unity game worlds; ASR-powered reading gates validate fluency and unlock the next scene.
 
 [![CI](https://github.com/knarayanareddy/LitPlay/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-117%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-132%20passing-brightgreen)](#testing)
 [![COPPA](https://img.shields.io/badge/COPPA-compliant%20day%201-blue)](#coppa--privacy)
 [![License](https://img.shields.io/badge/license-Proprietary-lightgrey)](#)
 
-Production-ready monorepo implementing the [LitPlay Master System Design Document v2.0](litplaymasterdoc.md) (SSOT). Every section reference (§) below maps to the SSOT.
+Monorepo implementation of the [LitPlay Master System Design Document v2.0](litplaymasterdoc.md) (SSOT). Every section reference (§) below maps to the SSOT. The services now support PostgreSQL-backed runtime repositories when `DATABASE_URL` is set, with in-memory repositories retained for isolated tests/local prototypes.
 
 ---
 
@@ -162,7 +162,7 @@ npx jest --config services/classroom-service/jest.config.cjs
 npx jest --config services/notification-service/jest.config.cjs
 
 # ASR service tests
-cd services/asr-service && pip install -r requirements.txt && python -m pytest tests/ -v
+cd services/asr-service && pip install -e '.[dev]' && python -m pytest tests/ -v
 ```
 
 ---
@@ -282,19 +282,20 @@ The scoring engine is tested against realistic child-reading scenarios:
 
 | Layer | Library | Stores |
 |-------|---------|--------|
-| **MMKV** (encrypted KV) | react-native-mmkv | Auth tokens, calibration, sync queue metadata, UI state |
-| **SQLite** (queryable) | op-sqlite | Session records, gate attempts, content manifests, assignment cache |
+| **MMKV** (encrypted KV) | react-native-mmkv | Auth tokens, calibration, last-sync timestamps, feature flags, small UI state |
+| **SQLite** (queryable) | op-sqlite | Sync queue, session records, gate attempts, content manifests, assignment cache |
 
 **Rule:** Query it (filter/sort/count) → SQLite. Look it up by key → MMKV.
 
 ### Sync Queue (§13.2)
 
 ```
-Device offline → session played → queued in MMKV (syncQueue:pending)
+Device offline → session played → queued in SQLite `sync_queue` table
 Device reconnects → flushQueue() → POST /progress/sessions/batch-sync (batch of 20)
-  ├─ 2xx → remove from queue
-  ├─ 4xx → move to dead queue (manual review)
-  └─ 5xx → keep in queue, exponential backoff (5s base, 5m max)
+  ├─ 2xx → remove synced rows from SQLite
+  ├─ per-item failures → mark row as `dead` for manual review
+  ├─ 4xx batch error → move batch rows to dead queue
+  └─ 5xx/network → keep rows pending, increment retry count, exponential backoff (5s base, 5m max)
 Items older than 30 days → purged with warning log
 ```
 
@@ -376,13 +377,15 @@ DELETE /auth/me
 
 | Service | Tests | Coverage Focus |
 |---------|-------|----------------|
-| asr-service | 51 | Scoring (95%), API |
-| auth-service | 21 | COPPA (95%), token rotation |
-| progress-service | 11 | Offline sync (90%) |
+| asr-service | 58 | Scoring (95%), API, provider routing, auth enforcement |
+| analytics-service | 5 | Event ingestion, ClickHouse row mapping |
+| server-kit | 2 | Fastify 5 startup smoke, rate-limit registration |
+| auth-service | 31 | COPPA (95%), token rotation, REST routes |
+| progress-service | 11 | Offline sync (90%), fluency |
 | content-service | 8 | Catalog, assignments |
 | classroom-service | 7 | Join codes, goals |
 | notification-service | 10 | Event dispatch, quiet hours |
-| **Total** | **108** | |
+| **Total** | **132** | |
 
 ### Key E2E Scenarios (§29.3)
 1. New student registers → parent consents → student plays gate → progress recorded
@@ -408,7 +411,7 @@ DELETE /auth/me
 | Storage/CDN | S3 + CloudFront |
 | API Gateway | API Gateway v2 + WAF |
 | Secrets | AWS Secrets Manager |
-| IaC | Terraform (per-service modules) |
+| IaC | Terraform baseline: VPC, RDS per service, ECS/Fargate, ASR GPU ASG, MSK, Redis, ClickHouse/EFS, S3/CloudFront, ALB, WAF |
 
 ### Environments (§25.2)
 

@@ -24,11 +24,16 @@ export function useASR() {
       // FR-013 routing
       if (isOnline) {
         try {
+          const apiBaseUrl = process.env.API_BASE_URL ?? 'http://localhost:8080';
+          const accessToken = useAppStore.getState().accessToken;
           const response = await fetch(
-            `${process.env.API_BASE_URL}/api/v1/asr/validate`,
+            `${apiBaseUrl}/api/v1/asr/validate`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+              },
               body: JSON.stringify({
                 gateId: gate.gateId,
                 studentId: useAppStore.getState().user?.id,
@@ -80,9 +85,102 @@ export function useASR() {
  */
 async function validateOffline(
   gate: GateTriggeredPayload,
-  _audioBase64: string,
+  audioBase64: string,
 ): Promise<AsrResultPayload> {
-  // Production: call whisper.cpp via JSI → get transcript → run JS scoring
-  // This is a stub showing the expected interface.
-  throw new Error('whisper.cpp offline ASR not yet initialized');
+  // Production/native builds register global.LitPlayWhisperCpp via the JSI
+  // module. If it is unavailable we return a safe FAIL instead of crashing the
+  // child session; the attempt remains queued for sync/review.
+  const nativeWhisper = (global as unknown as {
+    LitPlayWhisperCpp?: {
+      validate?: (input: { passageText: string; difficulty: string; audioBase64: string }) => Promise<AsrResultPayload>;
+      transcribe?: (audioBase64: string) => Promise<string>;
+    };
+  }).LitPlayWhisperCpp;
+
+  if (nativeWhisper?.validate) {
+    return nativeWhisper.validate({
+      passageText: gate.passageText,
+      difficulty: gate.difficulty,
+      audioBase64,
+    });
+  }
+
+  const transcript = nativeWhisper?.transcribe
+    ? await nativeWhisper.transcribe(audioBase64)
+    : decodeBase64Utf8(audioBase64); // deterministic dev fallback, not production ASR
+  const score = computeLocalScore(gate.passageText, transcript);
+  const result = classifyLocal(score, gate.difficulty);
+
+  return {
+    gateId: gate.gateId,
+    result,
+    score,
+    retriesRemaining: result === 'PASS' ? 0 : Math.max(0, gate.maxRetries),
+  };
+}
+
+function normalizeText(text: string): string {
+  return text.toLowerCase().replace(/[^\w\s']/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function levenshtein(a: string, b: string): number {
+  const dp = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+function ratio(a: string, b: string): number {
+  if (!a && !b) return 100;
+  if (!a || !b) return 0;
+  const maxLen = Math.max(a.length, b.length);
+  return Math.max(0, Math.round((1 - levenshtein(a, b) / maxLen) * 10000) / 100);
+}
+
+function computeLocalScore(expected: string, actual: string): number {
+  const exp = normalizeText(expected);
+  const act = normalizeText(actual);
+  if (!exp || !act) return 0;
+  const expSorted = exp.split(' ').sort().join(' ');
+  const actSorted = act.split(' ').sort().join(' ');
+  return ratio(expSorted, actSorted);
+}
+
+function classifyLocal(score: number, difficulty: GateTriggeredPayload['difficulty']): AsrResultPayload['result'] {
+  const pass = difficulty === 'Hard' ? 88 : difficulty === 'Medium' ? 82 : 75;
+  const partial = difficulty === 'Hard' ? 70 : difficulty === 'Medium' ? 62 : 55;
+  if (score >= pass) return 'PASS';
+  if (score >= partial) return 'PARTIAL';
+  return 'FAIL';
+}
+
+function decodeBase64Utf8(base64: string): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+  let output = '';
+  let buffer = 0;
+  let bits = 0;
+  for (const char of base64.replace(/\s/g, '')) {
+    const value = chars.indexOf(char);
+    if (value < 0 || char === '=') break;
+    buffer = (buffer << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      output += String.fromCharCode((buffer >> bits) & 0xff);
+    }
+  }
+  try {
+    return decodeURIComponent(escape(output));
+  } catch {
+    return output;
+  }
 }

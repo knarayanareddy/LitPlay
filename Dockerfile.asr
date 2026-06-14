@@ -14,9 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY services/asr-service/pyproject.toml ./
-RUN pip install --no-cache-dir fastapi uvicorn[standard] pydantic rapidfuzz metaphone structlog prometheus-client
+RUN pip install --no-cache-dir fastapi uvicorn[standard] pydantic rapidfuzz metaphone PyJWT structlog prometheus-client
 
-COPY services/asr-service/app ./app
+COPY services/asr-service/asr_app ./asr_app
 
 RUN useradd -m -u 1001 asr
 USER asr
@@ -26,4 +26,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "asr_app.main:app", "--host", "0.0.0.0", "--port", "8080"]

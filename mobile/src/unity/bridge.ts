@@ -18,7 +18,6 @@ import {
   type BridgeEventType,
   type GateTriggeredPayload,
   type AsrResultPayload,
-  type SceneCompletedPayload,
 } from '@litplay/contracts';
 
 type MessageHandler = (payload: unknown, requestId: string) => void;
@@ -74,12 +73,16 @@ export class UnityBridge {
 
     // Handle ACKs for our outgoing messages
     if (msg.type === 'BRIDGE_ACK') {
-      const ack = msg.payload as { requestId: string };
-      const pending = this.pendingAcks.get(ack.requestId);
+      // Unity encodes the ACK correlation ID in the top-level requestId header.
+      // Older bridge payloads may also include { requestId }, so support both.
+      const payloadAck = msg.payload as { requestId?: string } | undefined;
+      const ackRequestId = payloadAck?.requestId ?? msg.requestId;
+      const pending = this.pendingAcks.get(ackRequestId);
       if (pending) {
-        clearTimeout(this.retryTimers.get(ack.requestId));
-        this.retryTimers.delete(ack.requestId);
-        this.pendingAcks.delete(ack.requestId);
+        const retryTimer = this.retryTimers.get(ackRequestId);
+        if (retryTimer) clearTimeout(retryTimer);
+        this.retryTimers.delete(ackRequestId);
+        this.pendingAcks.delete(ackRequestId);
         pending.resolve();
       }
       return;
@@ -140,7 +143,7 @@ export class UnityBridge {
       await this.sendToUnity('ASR_RESULT', result);
     } catch (err) {
       // §9.3 — after bypassTimeoutMs, show accessible "tap to try again"
-      console.error('[bridge] Gate ASR failed, showing bypass prompt', err);
+      console.error(`[bridge] Gate ASR failed, showing bypass prompt after ${BRIDGE_BYPASS_TIMEOUT_MS}ms`, err);
       // In production: show accessibility-friendly retry prompt after BRIDGE_BYPASS_TIMEOUT_MS
     }
   }

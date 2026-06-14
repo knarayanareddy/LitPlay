@@ -74,6 +74,15 @@ export class InterServiceClient {
     );
   }
 
+  async getStudentsFluency(studentIds: string[]): Promise<Record<string, unknown>> {
+    return this.request(
+      getUrls().progressService!,
+      'POST',
+      '/api/v1/progress/students/fluency/batch',
+      { studentIds },
+    ) as Promise<Record<string, unknown>>;
+  }
+
   async getStudentSummary(studentId: string): Promise<unknown> {
     return this.request(
       getUrls().progressService!,

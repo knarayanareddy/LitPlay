@@ -8,7 +8,7 @@
 
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
-import pino from 'pino';
+import { registerRateLimit } from './rate-limit.js';
 
 export interface ServiceConfig {
   name: string;
@@ -59,10 +59,12 @@ export function paginate<T>(
 }
 
 export function createService(config: ServiceConfig): FastifyInstance {
-  const logger = config.logger === false ? false : pino({ name: config.name, level: process.env.LOG_LEVEL ?? 'info' });
+  const logger = config.logger === false
+    ? false
+    : { name: config.name, level: process.env.LOG_LEVEL ?? 'info' };
 
   const app = Fastify({
-    logger: logger as any,
+    logger,
     genReqId: () => crypto.randomUUID(),
   });
 
@@ -81,27 +83,26 @@ export function createService(config: ServiceConfig): FastifyInstance {
 
   // §27.3 — optional rate limiting (default: enabled, disabled in tests)
   if (config.rateLimit !== false) {
-    // Inline import to avoid circular dependency with rate-limit.ts → server.ts
-    const { registerRateLimit } = require('./rate-limit.js') as typeof import('./rate-limit.js');
     registerRateLimit(app);
   }
 
   // Central error normalizer (§11.1) — guards against double-send (§30)
   app.setErrorHandler((err, _req, reply) => {
     if (reply.sent) return;
+    const e = err as Error & { validation?: unknown; statusCode?: number; code?: string };
     const reqId = reply.request.id;
-    if (err.validation) {
-      return apiError(reply, 400, 'VALIDATION_ERROR', err.message);
+    if (e.validation) {
+      return apiError(reply, 400, 'VALIDATION_ERROR', e.message);
     }
-    const statusCode = err.statusCode ?? 500;
+    const statusCode = e.statusCode ?? 500;
     if (statusCode >= 500) {
-      app.log.error({ err, reqId }, 'unhandled_error');
+      app.log.error({ err: e, reqId }, 'unhandled_error');
     }
     return apiError(
       reply,
       statusCode,
-      err.code ?? 'INTERNAL_ERROR',
-      statusCode >= 500 ? 'An internal error occurred' : err.message,
+      e.code ?? 'INTERNAL_ERROR',
+      statusCode >= 500 ? 'An internal error occurred' : e.message,
     );
   });
 
@@ -109,8 +110,22 @@ export function createService(config: ServiceConfig): FastifyInstance {
 }
 
 /** Start a service, with graceful shutdown. */
+function assertProductionSecrets(): void {
+  if (process.env.NODE_ENV !== 'production') return;
+  const access = process.env.JWT_ACCESS_SECRET;
+  const refresh = process.env.JWT_REFRESH_SECRET;
+  if (!access || access.includes('dev-secret') || access.length < 32) {
+    throw new Error('JWT_ACCESS_SECRET must be set to a strong production secret');
+  }
+  // Only auth-service needs refresh-token signing, but if provided it must be strong.
+  if (refresh !== undefined && (refresh.includes('dev-refresh') || refresh.length < 32)) {
+    throw new Error('JWT_REFRESH_SECRET must be set to a strong production secret');
+  }
+}
+
 export async function startService(app: FastifyInstance, port: number): Promise<void> {
   try {
+    assertProductionSecrets();
     await app.listen({ port, host: '0.0.0.0' });
   } catch (err) {
     app.log.error(err);

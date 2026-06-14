@@ -7,6 +7,7 @@
 
 using UnityEngine;
 using System;
+using System.Reflection;
 
 namespace LitPlay
 {
@@ -39,13 +40,38 @@ namespace LitPlay
         }
 
 #if !UNITY_EDITOR
-        // P/Invoke to the native UnityMessageManager (Android/iOS)
-        // The actual binding is provided by react-native-unity-view
         private static void SendMessageToRNNative(string json)
         {
-            // In the react-native-unity-view integration, this calls:
-            // UnityMessageManager.Instance.SendMessageToRN(json);
-            // The exact mechanism differs by platform (Android JNI vs iOS native).
+            // react-native-unity-view exposes a UnityMessageManager singleton.
+            // Resolve it via reflection so the Unity project can compile even
+            // when the native package has not been imported in editor/test envs.
+            Type managerType =
+                Type.GetType("UnityMessageManager") ??
+                Type.GetType("ReactNativeUnityView.UnityMessageManager") ??
+                Type.GetType("UnityMessageManager, Assembly-CSharp");
+
+            if (managerType == null)
+            {
+                Debug.LogError("[LitPlayBridge] UnityMessageManager type not found; cannot send message to RN");
+                return;
+            }
+
+            object instance = null;
+            var instanceProp = managerType.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static);
+            if (instanceProp != null) instance = instanceProp.GetValue(null);
+
+            var sendMethod = managerType.GetMethod(
+                "SendMessageToRN",
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static
+            );
+
+            if (sendMethod == null)
+            {
+                Debug.LogError("[LitPlayBridge] UnityMessageManager.SendMessageToRN not found");
+                return;
+            }
+
+            sendMethod.Invoke(sendMethod.IsStatic ? null : instance, new object[] { json });
         }
 #endif
     }
@@ -69,6 +95,12 @@ namespace LitPlay
                 payload = payload ?? "{}",
             };
         }
+    }
+
+    [Serializable]
+    public class BridgeAckPayload
+    {
+        public string requestId;
     }
 
     [Serializable]

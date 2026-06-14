@@ -7,8 +7,8 @@ determines whether a child's reading attempt unlocks the next scene.
 
 import pytest
 
-from app.config import Difficulty
-from app.scoring import (
+from asr_app.config import Difficulty
+from asr_app.scoring import (
     classify,
     compute_scores,
     normalize,

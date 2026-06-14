@@ -35,6 +35,7 @@ function makeOfflineSession(overrides?: Partial<OfflineSession>): OfflineSession
     wpm: 60,
     gateAttempts: [
       {
+        id: crypto.randomUUID(),
         gateId: GATE_ID,
         attemptNumber: 1,
         transcript: 'the cat sat',
@@ -167,6 +168,8 @@ describe('ProgressService batchSync (offline §13.2)', () => {
     const all = await repo.listSessions(VALID_UUID, 1, 100);
     // The same UUID is a single record (no duplication of data)
     expect(all.filter((s) => s.id === offline.id)).toHaveLength(1);
+    // Gate attempts carry stable client IDs and are also idempotent.
+    expect(repo.attempts.size).toBe(1);
   });
 });
 

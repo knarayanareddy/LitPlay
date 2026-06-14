@@ -66,8 +66,11 @@ describe('NotificationService.handleEvent', () => {
     expect(records[0].template).toBe('deletion_confirmation');
   });
 
-  it('sends push notification on assignment.created (§21.1)', async () => {
+  it('sends push notification on assignment.created when user opted in (§21.1)', async () => {
     const { repo, service } = makeService();
+    jest.spyOn(NotificationService, 'hourInTimezone').mockReturnValue(10);
+    repo.setPushPreference('student-1', { hasPermission: true, timezone: 'UTC' });
+    repo.setDeviceTokens('student-1', [{ userId: 'student-1', token: 'fcm-token', platform: 'android' }]);
     const envelope: EventEnvelope = buildEvent(
       TOPICS.CONTENT_ASSIGNMENT_CREATED,
       'content-service',

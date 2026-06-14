@@ -24,7 +24,7 @@ interface OfflineState {
 }
 
 interface FeatureFlagState {
-  flags: Record<string, boolean | string>;
+  flags: Record<string, boolean | string | number>;
 }
 
 interface AppStore extends AuthState, OfflineState, FeatureFlagState {
@@ -33,7 +33,7 @@ interface AppStore extends AuthState, OfflineState, FeatureFlagState {
   setOnline: (online: boolean) => void;
   setSyncQueueLength: (len: number) => void;
   setLastSyncAt: (iso: string) => void;
-  setFlag: (key: string, value: boolean | string) => void;
+  setFlag: (key: string, value: boolean | string | number) => void;
 }
 
 export const useAppStore = create<AppStore>((set) => ({
