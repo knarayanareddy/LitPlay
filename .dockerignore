@@ -1,0 +1,12 @@
+node_modules
+dist
+build
+*.tsbuildinfo
+__pycache__
+*.pyc
+.pytest_cache
+coverage
+.git
+.env
+mobile/android
+mobile/ios

@@ -1,0 +1,112 @@
+// ============================================================
+// LitPlay — Prisma schema for auth-service (§14.2)
+// Generated client is used by the production PrismaAuthRepository.
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                     String            @id @default(uuid()) @db.Uuid
+  email                  String            @unique @db.VarChar(255)
+  passwordHash           String?           @db.VarChar(255)
+  role                   UserRole
+  displayName            String?           @db.VarChar(100)
+  dateOfBirth            DateTime?         @db.Date
+  locale                 String            @default("en-US") @db.VarChar(10)
+  requiresParentalConsent Boolean          @default(false)
+  parentId               String?           @db.Uuid
+  createdAt              DateTime          @default(now()) @db.Timestamptz
+  updatedAt              DateTime          @updatedAt @db.Timestamptz
+  deletedAt              DateTime?         @db.Timestamptz
+
+  refreshTokens     RefreshToken[]
+  oauthConnections  OAuthConnection[]
+  parentalConsents  ParentalConsent[]     @relation("ChildConsents")
+  consentsAsParent  ParentalConsent[]     @relation("ParentConsents")
+  passwordResets    PasswordResetToken[]
+
+  @@index([email], where: [deletedAt == null])
+  @@index([role])
+  @@map("users")
+}
+
+enum UserRole {
+  student
+  parent
+  teacher
+  admin
+}
+
+enum ConsentStatus {
+  pending
+  verified
+  rejected
+  revoked
+}
+
+model RefreshToken {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  tokenHash   String    @unique @db.VarChar(255)
+  tokenFamily String    @db.Uuid
+  issuedAt    DateTime  @db.Timestamptz
+  expiresAt   DateTime  @db.Timestamptz
+  revokedAt   DateTime? @db.Timestamptz
+  deviceId    String?   @db.VarChar(255)
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenFamily])
+  @@map("refresh_tokens")
+}
+
+model OAuthConnection {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @db.Uuid
+  provider        String   @db.VarChar(50)
+  providerSubject String   @db.VarChar(255)
+  createdAt       DateTime @default(now()) @db.Timestamptz
+  updatedAt       DateTime @updatedAt @db.Timestamptz
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerSubject])
+  @@map("oauth_connections")
+}
+
+model ParentalConsent {
+  id            String        @id @default(uuid()) @db.Uuid
+  childId       String        @db.Uuid
+  parentId      String?       @db.Uuid
+  status        ConsentStatus @default(pending)
+  consentMethod String?       @db.VarChar(50)
+  consentedAt   DateTime?     @db.Timestamptz
+  createdAt     DateTime      @default(now()) @db.Timestamptz
+  updatedAt     DateTime      @updatedAt @db.Timestamptz
+  child         User          @relation("ChildConsents", fields: [childId], references: [id], onDelete: Cascade)
+  parent        User?         @relation("ParentConsents", fields: [parentId], references: [id])
+
+  @@index([childId])
+  @@map("parental_consents")
+}
+
+model PasswordResetToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  tokenHash  String    @db.VarChar(255)
+  expiresAt  DateTime  @db.Timestamptz
+  usedAt     DateTime? @db.Timestamptz
+  createdAt  DateTime  @default(now()) @db.Timestamptz
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}

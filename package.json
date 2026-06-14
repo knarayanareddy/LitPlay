@@ -1,0 +1,37 @@
+{
+  "name": "litplay",
+  "version": "2.0.0",
+  "private": true,
+  "description": "LitPlay — literacy-first educational gaming platform with ASR-powered reading gates",
+  "license": "Proprietary",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "services/auth-service",
+    "services/progress-service",
+    "services/content-service",
+    "services/classroom-service",
+    "services/notification-service"
+  ],  "scripts": {
+    "build": "tsc -b",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "dev:auth": "npm run dev --workspace services/auth-service",
+    "dev:progress": "npm run dev --workspace services/progress-service",
+    "dev:content": "npm run dev --workspace services/content-service",
+    "dev:classroom": "npm run dev --workspace services/classroom-service",
+    "dev:notification": "npm run dev --workspace services/notification-service"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.14.0",
+    "jest": "^29.7.0",
+    "resolve.exports": "^2.0.3",
+    "ts-jest": "^29.1.5",
+    "tsx": "^4.15.0",
+    "typescript": "^5.5.0"
+  }
+}

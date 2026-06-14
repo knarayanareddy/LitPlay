@@ -1,0 +1,97 @@
+// ============================================================
+// LitPlay — Prisma schema for progress-service (§14.3)
+// NOTE: No audio stored. No audio column ever. (FR-017)
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SessionStatus {
+  active
+  completed
+  abandoned
+}
+
+enum GateResult {
+  PASS
+  PARTIAL
+  FAIL
+}
+
+enum AsrProvider {
+  whisper_gpu
+  azure
+  whisper_cpp
+}
+
+model Session {
+  id                  String        @id @default(uuid()) @db.Uuid
+  studentId           String        @db.Uuid
+  contentId           String        @db.Uuid
+  status              SessionStatus @default(active)
+  startedAt           DateTime      @db.Timestamptz
+  endedAt             DateTime?     @db.Timestamptz
+  wordsRead           Int           @default(0)
+  wpm                 Decimal?      @db.Decimal(6, 2)
+  syncedFromOffline   Boolean       @default(false)
+  createdAt           DateTime      @default(now()) @db.Timestamptz
+  updatedAt           DateTime      @updatedAt @db.Timestamptz
+  gateAttempts        GateAttempt[]
+
+  @@index([studentId, startedAt(sort: Desc)])
+  @@index([contentId])
+  @@index([status])
+  @@map("sessions")
+}
+
+model GateAttempt {
+  id                  String      @id @default(uuid()) @db.Uuid
+  sessionId           String      @db.Uuid
+  gateId              String      @db.Uuid
+  attemptNumber       Int         @db.SmallInt
+  transcript          String?     @db.Text
+  score               Decimal?    @db.Decimal(5, 2)
+  result              GateResult
+  asrProvider         AsrProvider
+  latencyMs           Int?
+  audioDurationMs     Int?
+  audioNoiseFloorDb   Decimal?    @db.Decimal(6, 2)
+  audioVadResult      Boolean?
+  attemptedAt         DateTime    @db.Timestamptz
+  createdAt           DateTime    @default(now()) @db.Timestamptz
+  session             Session     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([gateId])
+  @@index([sessionId, result])
+  @@map("gate_attempts")
+}
+
+model FluencyScore {
+  studentId           String   @id @db.Uuid
+  currentWpm          Decimal  @db.Decimal(6, 2)
+  totalWordsRead      BigInt   @default(0)
+  totalSessions       Int      @default(0)
+  gateAttemptsTotal   Int      @default(0)
+  gateAttemptsPassed  Int      @default(0)
+  computedAt          DateTime @db.Timestamptz
+  updatedAt           DateTime @updatedAt @db.Timestamptz
+
+  @@map("fluency_scores")
+}
+
+model WpmTrend {
+  studentId  String  @db.Uuid
+  recordedOn DateTime @db.Date
+  avgWpm     Decimal @db.Decimal(6, 2)
+
+  @@id([studentId, recordedOn])
+  @@index([studentId, recordedOn(sort: Desc)])
+  @@map("wpm_trends")
+}

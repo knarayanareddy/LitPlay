@@ -1,0 +1,53 @@
+# ============================================================
+# LitPlay Node.js service Dockerfile (§10.1 rule 8, §25)
+# Multi-stage build for minimal production image.
+# ============================================================
+
+# --- Build stage ---
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+# Copy workspace root + shared packages + service
+COPY package.json package-lock.json* ./
+COPY packages/ ./packages/
+COPY services/auth-service ./services/auth-service
+COPY services/progress-service ./services/progress-service
+COPY services/content-service ./services/content-service
+COPY services/classroom-service ./services/classroom-service
+COPY services/notification-service ./services/notification-service
+COPY tsconfig.base.json ./
+
+RUN npm ci --workspaces --include-workspace-root 2>/dev/null || npm install
+
+# Build shared packages
+RUN npx tsc -p packages/contracts/tsconfig.json && \
+    npx tsc -p packages/server-kit/tsconfig.json
+
+ARG SERVICE_NAME
+RUN cd services/${SERVICE_NAME} && npx tsc
+
+# --- Production stage ---
+FROM node:20-alpine AS production
+WORKDIR /app
+
+RUN addgroup -g 1001 -S litplay && \
+    adduser -S litplay -u 1001 -G litplay
+
+COPY package.json package-lock.json* ./
+COPY packages/ ./packages/
+COPY tsconfig.base.json ./
+
+# Install only production deps
+RUN npm ci --omit=dev --workspaces --include-workspace-root 2>/dev/null || npm install --omit=dev
+
+ARG SERVICE_NAME
+ENV SERVICE_NAME=${SERVICE_NAME}
+COPY --from=builder /app/services/${SERVICE_NAME}/dist ./services/${SERVICE_NAME}/dist
+
+USER litplay
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+CMD ["sh", "-c", "node services/${SERVICE_NAME}/dist/server.js"]

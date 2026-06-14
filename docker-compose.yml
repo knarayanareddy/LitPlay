@@ -1,0 +1,130 @@
+# ============================================================
+# LitPlay — Local Development Docker Compose (§25.2)
+#
+# Spins up all services + infrastructure for local integration testing.
+# Usage: docker compose up
+# ============================================================
+
+services:
+  # --- Infrastructure ---
+  postgres-auth:
+    image: postgres:16-alpine
+    environment: { POSTGRES_DB: auth_db, POSTGRES_USER: litplay, POSTGRES_PASSWORD: devpassword }
+    ports: ["5432:5432"]
+    volumes: [ "./packages/db/auth:/docker-entrypoint-initdb.d" ]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U litplay"], interval: 5s, timeout: 3s, retries: 5 }
+
+  postgres-progress:
+    image: postgres:16-alpine
+    environment: { POSTGRES_DB: progress_db, POSTGRES_USER: litplay, POSTGRES_PASSWORD: devpassword }
+    ports: ["5433:5432"]
+    volumes: [ "./packages/db/progress:/docker-entrypoint-initdb.d" ]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U litplay"], interval: 5s, timeout: 3s, retries: 5 }
+
+  postgres-content:
+    image: postgres:16-alpine
+    environment: { POSTGRES_DB: content_db, POSTGRES_USER: litplay, POSTGRES_PASSWORD: devpassword }
+    ports: ["5434:5432"]
+    volumes: [ "./packages/db/content:/docker-entrypoint-initdb.d" ]
+
+  postgres-classroom:
+    image: postgres:16-alpine
+    environment: { POSTGRES_DB: classroom_db, POSTGRES_USER: litplay, POSTGRES_PASSWORD: devpassword }
+    ports: ["5435:5432"]
+    volumes: [ "./packages/db/classroom:/docker-entrypoint-initdb.d" ]
+
+  postgres-notification:
+    image: postgres:16-alpine
+    environment: { POSTGRES_DB: notification_db, POSTGRES_USER: litplay, POSTGRES_PASSWORD: devpassword }
+    ports: ["5436:5432"]
+    volumes: [ "./packages/db/notification:/docker-entrypoint-initdb.d" ]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, retries: 5 }
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    ports: ["8123:8123", "9000:9000"]
+    volumes: [ "./packages/db/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql" ]
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      CLUSTER_ID: "litplay-dev-cluster-001"
+    ports: ["9092:9092"]
+
+  # --- API Gateway (§5) ---
+  api-gateway:
+    image: nginx:alpine
+    ports: ["8080:80"]
+    volumes: [ "./infra/api-gateway/nginx.conf:/etc/nginx/nginx.conf:ro" ]
+    depends_on: [ auth-service, progress-service, content-service, classroom-service, notification-service, asr-service ]
+
+  # --- Application Services ---
+  auth-service:
+    build: { context: ., dockerfile: Dockerfile.node, args: { SERVICE_NAME: auth-service } }
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://litplay:devpassword@postgres-auth:5432/auth_db
+      JWT_ACCESS_SECRET: dev-access-secret
+      JWT_REFRESH_SECRET: dev-refresh-secret
+      KAFKA_BROKERS: kafka:9092
+    depends_on: { postgres-auth: { condition: service_healthy } }
+
+  progress-service:
+    build: { context: ., dockerfile: Dockerfile.node, args: { SERVICE_NAME: progress-service } }
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://litplay:devpassword@postgres-progress:5432/progress_db
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:9092
+      CONTENT_SERVICE_URL: http://content-service:3000
+    depends_on: { postgres-progress: { condition: service_healthy }, redis: { condition: service_started } }
+
+  content-service:
+    build: { context: ., dockerfile: Dockerfile.node, args: { SERVICE_NAME: content-service } }
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://litplay:devpassword@postgres-content:5432/content_db
+      KAFKA_BROKERS: kafka:9092
+
+  classroom-service:
+    build: { context: ., dockerfile: Dockerfile.node, args: { SERVICE_NAME: classroom-service } }
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://litplay:devpassword@postgres-classroom:5432/classroom_db
+      KAFKA_BROKERS: kafka:9092
+      PROGRESS_SERVICE_URL: http://progress-service:3000
+
+  notification-service:
+    build: { context: ., dockerfile: Dockerfile.node, args: { SERVICE_NAME: notification-service } }
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://litplay:devpassword@postgres-notification:5432/notification_db
+      KAFKA_BROKERS: kafka:9092
+
+  asr-service:
+    build: { context: ., dockerfile: Dockerfile.asr }
+    environment:
+      PORT: 8080
+      WHISPER_GPU_ENABLED: "false"
+      AZURE_SPEECH_KEY: ${AZURE_SPEECH_KEY:-}
+      AZURE_SPEECH_REGION: ${AZURE_SPEECH_REGION:-eastus}
+
+  analytics-service:
+    build: { context: ., dockerfile: Dockerfile.analytics }
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+    depends_on: [ kafka, clickhouse ]

@@ -1,0 +1,45 @@
+{
+  "auth": {
+    "welcome": "Welcome to LitPlay!",
+    "login": "Log In",
+    "register": "Create Account",
+    "email": "Email",
+    "password": "Password",
+    "loginButton": "Start Reading",
+    "consentPending": "Waiting for parent approval. Ask a grown-up to check their email!",
+    "consentVerified": "You're all set! Let's start reading."
+  },
+  "gate": {
+    "readAloud": "Read this out loud:",
+    "listening": "Listening...",
+    "tryAgain": "Tap to try again",
+    "great": "Great reading!",
+    "almost": "So close! Try again.",
+    "takeBreak": "Let's take a break and try again later.",
+    "retriesLeft": "{{count}} tries left",
+    "retriesLeft_plural": "{{count}} tries left"
+  },
+  "progress": {
+    "wordsRead": "{{count}} words read",
+    "wordsRead_plural": "{{count}} words read",
+    "wpm": "{{wpm}} words per minute",
+    "streak": "{{count}} day streak",
+    "streak_plural": "{{count}} day streak",
+    "keepGoing": "Keep going!"
+  },
+  "classroom": {
+    "joinCode": "Join Code",
+    "enterCode": "Enter your class code",
+    "join": "Join Class",
+    "students": "Students",
+    "assignContent": "Assign Reading"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "retry": "Try Again",
+    "cancel": "Cancel",
+    "ok": "OK",
+    "offline": "You're offline. Your progress will sync when you reconnect."
+  }
+}

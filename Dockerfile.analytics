@@ -1,0 +1,25 @@
+# ============================================================
+# LitPlay Analytics Service Dockerfile (§10.7)
+# Python 3.11 + FastAPI + clickhouse-connect
+# ============================================================
+
+FROM python:3.11-slim AS base
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY services/analytics-service/pyproject.toml ./
+RUN pip install --no-cache-dir fastapi uvicorn[standard] pydantic structlog prometheus-client clickhouse-connect
+
+COPY services/analytics-service/app ./app
+
+RUN useradd -m -u 1001 analytics
+USER analytics
+
+EXPOSE 8081
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')" || exit 1
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8081"]

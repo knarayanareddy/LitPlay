@@ -1,0 +1,87 @@
+// ============================================================
+// LitPlay — Prisma schema for content-service (§14, §18)
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Difficulty {
+  Easy
+  Medium
+  Hard
+}
+
+model World {
+  id              String   @id @default(uuid()) @db.Uuid
+  title           String   @db.VarChar(255)
+  gradeLevel      String   @db.VarChar(20)
+  lexileRange     String   @db.VarChar(30)
+  language        String   @default("en-US") @db.VarChar(10)
+  tags            String[] @default([])
+  thumbnailUrl    String?
+  assetBundleUrl  String
+  manifestVersion String   @default("1") @db.VarChar(50)
+  checksumSha256  String?  @db.Char(64)
+  isPublished     Boolean  @default(false)
+  createdAt       DateTime @default(now()) @db.Timestamptz
+  updatedAt       DateTime @updatedAt @db.Timestamptz
+  deletedAt       DateTime? @db.Timestamptz
+  scenes          Scene[]
+  assignments     Assignment[]
+
+  @@index([isPublished], where: [deletedAt == null])
+  @@map("worlds")
+}
+
+model Scene {
+  id               String   @id @default(uuid()) @db.Uuid
+  worldId          String   @db.Uuid
+  title            String   @db.VarChar(255)
+  sceneIndex       Int
+  estimatedMinutes Int      @default(5)
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  updatedAt        DateTime @updatedAt @db.Timestamptz
+  world            World    @relation(fields: [worldId], references: [id], onDelete: Cascade)
+  gates            Gate[]
+
+  @@unique([worldId, sceneIndex])
+  @@index([worldId, sceneIndex])
+  @@map("scenes")
+}
+
+model Gate {
+  id          String     @id @default(uuid()) @db.Uuid
+  sceneId     String     @db.Uuid
+  passage     String     @db.Text
+  difficulty  Difficulty @default(Easy)
+  maxRetries  Int        @default(3) @db.SmallInt
+  orderIndex  Int        @default(0)
+  createdAt   DateTime   @default(now()) @db.Timestamptz
+  updatedAt   DateTime   @updatedAt @db.Timestamptz
+  scene       Scene      @relation(fields: [sceneId], references: [id], onDelete: Cascade)
+
+  @@unique([sceneId, orderIndex])
+  @@index([sceneId, orderIndex])
+  @@map("gates")
+}
+
+model Assignment {
+  id          String   @id @default(uuid()) @db.Uuid
+  contentId   String   @db.Uuid
+  studentId   String?  @db.Uuid
+  classroomId String?  @db.Uuid
+  assignedBy  String   @db.Uuid
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+  world       World    @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@index([classroomId])
+  @@map("assignments")
+}
