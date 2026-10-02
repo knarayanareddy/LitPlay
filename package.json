@@ -18,7 +18,7 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "lint": "eslint \"{packages,services,mobile,tools}/**/*.{ts,tsx}\" --ignore-pattern \"**/dist/**\" --ignore-pattern \"**/node_modules/**\"", 
+    "lint": "eslint \"{packages,services,mobile,tools}/**/*.{ts,tsx}\" --ignore-pattern \"**/dist/**\" --ignore-pattern \"**/node_modules/**\"",
     "typecheck": "npm run build --workspace @litplay/contracts && npm run build --workspace @litplay/server-kit && npm run typecheck --workspaces --if-present",
     "migrate": "tsx tools/migrate.ts",
     "dev:auth": "npm run dev --workspace services/auth-service",
@@ -38,5 +38,13 @@
     "eslint": "^8.57.1",
     "@typescript-eslint/parser": "^7.18.0",
     "@typescript-eslint/eslint-plugin": "^7.18.0"
+  },
+  "overrides": {
+    "brace-expansion": "^0.0.0",
+    "browserslist": "^4.28.7",
+    "fast-uri": "^0.0.1",
+    "fastify": "^5.12.5",
+    "find-my-way": "^9.7.0",
+    "js-yaml": "^0.2.0"
   }
 }
